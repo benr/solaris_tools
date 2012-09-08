@@ -1,0 +1,47 @@
+#!/usr/perl5/bin/perl
+#
+#  fsstat Zone Wrapper		- benr@joyent 1/24/09
+#
+#  This wrapper takes advantage of VOP Kstats available
+#  via fs_id (fs_id == mountpoint).  Because fsstat
+#  already allows stats based on fs_id, rather than write
+#  extensive dtrace scripts based on the fsstat Provider
+#  we can simply do it here by just passing all the
+#  zone root paths to fsstat.  (I actually wrote
+#  such a thing in dtrace, but this is better.)
+#
+# This is essentially a work around untill -Z is added
+# to fsstat.... if it ever happens.
+
+
+if ( $ARGV[0] == "" ) {
+	print "fsstat Zone Wrapper       - Joyent\n";
+	print "Usage: $0 <interval> <count>\n";
+	exit;
+}
+
+$INTERVAL = $ARGV[0];
+$COUNT = $ARGV[1];
+
+
+my @list = `zoneadm list -p`;
+
+$ZPATH = "";
+
+foreach $i (@list) {
+        chomp($i);
+
+        (my $id, my $zonename, my $zonestatus, my $zonepath) = split(/:/, $i);
+        
+        if ($zonename eq "global") { next; }
+        if ($zonestatus ne "running") { next; }
+
+        #print("Using $zonename $zonepath\n");
+
+        $ZPATH = "$ZPATH $zonepath";    
+        
+        
+}
+#print "/bin/fsstat $OPTIONS $ZPATH $INTERVAL $COUNT\n";
+exec("/bin/fsstat $OPTIONS $ZPATH $INTERVAL $COUNT");
+

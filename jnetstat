@@ -1,0 +1,154 @@
+#!/usr/perl5/bin/perl
+
+## benr@joyent.com      - quiksys proto 3/27/09
+
+
+use strict;
+use Sun::Solaris::Kstat;
+
+my $interval = 1;
+my $ARGS = @ARGV;
+
+# Parse Args
+
+if($ARGS > 0 && $ARGV[0] =~ m/\d+/) {
+        $interval = $ARGV[0];
+} elsif($ARGS > 0 && $ARGV[0] eq "-h") {
+        die("Usage: $0 <interval>\n");
+} 
+
+
+
+
+
+my $Kstat = Sun::Solaris::Kstat->new();
+
+
+my $last_publicSpeed            = 0;
+my $last_publicBytesIN          = 0;
+my $last_publicBytesOUT         = 0;
+my $last_publicPacketsIN        = 0;
+my $last_publicPacketsOUT       = 0;
+
+my $last_privateSpeed           = 0;
+my $last_privateBytesIN         = 0;
+my $last_privateBytesOUT        = 0;
+my $last_privatePacketsIN       = 0;
+my $last_privatePacketsOUT      = 0;
+
+my $last_RetransBytes = 0;
+my $last_RetransSegs = 0;
+my $last_OutBytes = 0;
+my $last_OutSegs = 0;
+
+print_header();
+my $counter = 0;
+
+while (1) {
+
+        my $publicSpeed     =  ${Kstat}->{e1000g}->{0}->{e1000g0}->{ifspeed} / 8;       #  Convert bits to bytes
+        my $publicBytesIN   =  ${Kstat}->{e1000g}->{0}->{e1000g0}->{rbytes64};
+        my $publicBytesOUT  =  ${Kstat}->{e1000g}->{0}->{e1000g0}->{obytes64};
+        my $publicPacketsIN =  ${Kstat}->{e1000g}->{0}->{e1000g0}->{ipackets64};
+        my $publicPacketsOUT =  ${Kstat}->{e1000g}->{0}->{e1000g0}->{opackets64};
+        my $publicSpeedMB    = $publicSpeed / 1048576;                                  # Convert from B/sec to MB/s
+
+        my $publicMB_IN  = ($publicBytesIN - $last_publicBytesIN) / 1048576;
+        my $publicMB_OUT = ($publicBytesOUT - $last_publicBytesOUT) / 1048576;
+
+        #printf("PUBLIC: Speed is %d MB/s : %.2f MB/s IN and %.2f MB/s OUT\n", $publicSpeedMB, $publicMB_IN, $publicMB_OUT);
+
+
+        my $privateSpeed     =  ${Kstat}->{e1000g}->{2}->{e1000g2}->{ifspeed} / 8;      #  Convert bits to bytes
+        my $privateBytesIN   =  ${Kstat}->{e1000g}->{2}->{e1000g2}->{rbytes64};
+        my $privateBytesOUT  =  ${Kstat}->{e1000g}->{2}->{e1000g2}->{obytes64};
+        my $privatePacketsIN =  ${Kstat}->{e1000g}->{2}->{e1000g2}->{ipackets64};
+        my $privatePacketsOUT =  ${Kstat}->{e1000g}->{2}->{e1000g2}->{opackets64};
+        my $privateSpeedMB    = $privateSpeed / 1048576;
+
+        my $privateMB_IN  = ($privateBytesIN  - $last_privateBytesIN) / 1048576;
+        my $privateMB_OUT = ($privateBytesOUT - $last_privateBytesOUT) / 1048576;
+
+        ##
+
+        # Get tcp:0:tcp:retransBytes
+        my $RetransBytes = ${Kstat}->{tcp}->{0}->{tcp}->{retransBytes};
+
+        # Get tcp:0:tcp:retransSegs
+        my $RetransSegs = ${Kstat}->{tcp}->{0}->{tcp}->{retransSegs};
+
+        # Get tcp:0:tcp:outDataBytes
+        my $OutBytes = ${Kstat}->{tcp}->{0}->{tcp}->{outDataBytes};
+
+        # Get tcp:0:tcp:outDataSegs
+        my $OutSegs = ${Kstat}->{tcp}->{0}->{tcp}->{outDataSegs};
+
+        # Caluclate the current packet deltas
+        my $interval_OutSegs = $OutSegs - $last_OutSegs; 
+        my $interval_RetransSegs = $RetransSegs - $last_RetransSegs; 
+
+        # Get tcp:0:tcp:currEstab
+        my $tcpSessions = ${Kstat}->{tcp}->{0}->{tcp}->{currEstab};
+
+        # Calculate Ratio
+        my $retrans_ratio = $interval_RetransSegs / $interval_OutSegs;
+        $retrans_ratio =~ s/.*\.(\d{2})(\d*)/$1\.$2/;
+
+        ## OUTPUT:
+        unless ( $counter == 0 ) {
+        printf("| %5d  %3d%% |  %5d  %3d%%  |  %5d  %5d%% |  %5d  %3d%%  |  %5d %3d%% |\n",
+                        $publicMB_IN * 8,
+                        ( $publicMB_IN / $publicSpeedMB ) * 100,
+                        $publicMB_OUT * 8,
+                        ( $publicMB_OUT / $publicSpeedMB ) * 100,
+                        $privateMB_IN * 8,
+                        ( $privateMB_IN / $privateSpeedMB ) * 100,
+                        $privateMB_OUT * 8,
+                        ( $privateMB_OUT / $privateSpeedMB ) * 100,
+                        $tcpSessions,
+                        $retrans_ratio
+                        );
+        }
+                        
+
+
+        sleep($interval);
+        $Kstat->update();
+
+	if ( $counter > 50 ) {
+		print_header();	
+		$counter = 1;
+	} else {
+        	$counter++;
+	}
+
+        ## Retention
+        $last_RetransBytes      = $RetransBytes;
+        $last_RetransSegs       = $RetransSegs;
+        $last_OutBytes          = $OutBytes;
+        $last_OutSegs           = $OutSegs;
+
+        $last_publicSpeed            = $publicSpeed;
+        $last_publicBytesIN          = $publicBytesIN;
+        $last_publicBytesOUT         = $publicBytesOUT;
+        $last_publicPacketsIN        = $publicPacketsIN;
+        $last_publicPacketsOUT       = $publicPacketsOUT;
+
+        $last_privateSpeed           = $privateSpeed;
+        $last_privateBytesIN         = $privateBytesIN;
+        $last_privateBytesOUT        = $privateBytesOUT;
+        $last_privatePacketsIN       = $privatePacketsIN;
+        $last_privatePacketsOUT      = $privatePacketsOUT;
+        ##
+}
+
+
+
+sub print_header()
+{
+	#######|  0.60    0% |  17.96   15%  |  14.21     11% |   0.32    0%  |    466   0% |
+	print("+----------------------------------------------------------------------------+\n");
+	print("|    PUBLIC  -  e1000g0       |     PRIVATE   - e1000g2        |    T C P    |\n");
+	print("| IN Mb/s     |   OUT Mb/s    |    IN Mb/s     |  OUT Mb/s     | ActSes Retr |\n"); 
+	print("+-------------+---------------+----------------+---------------+-------------+\n");
+}

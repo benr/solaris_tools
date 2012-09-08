@@ -1,0 +1,27 @@
+#!/usr/bin/bash
+
+## ZDUMP v0.2	-benr 11/20/08
+
+
+if [ ! $2 ]
+then
+	echo "Usage: zdump some/dataset /some/file.zdump"
+	exit
+fi
+
+
+DS_COUNT=`zfs list -Hrt filesystem ${1} | wc -l` 
+
+if [ $DS_COUNT -gt 1 ]
+then
+	echo "Creating recursive dump...."
+	zfs snapshot -r ${1}@zdump
+	zfs send -R $1@zdump > $2
+	zfs destroy -r ${1}@zdump
+else
+	echo "Creating standard dump...."
+	zfs snapshot ${1}@zdump
+	zfs send $1@zdump > $2
+	zfs destroy ${1}@zdump
+fi
+	
